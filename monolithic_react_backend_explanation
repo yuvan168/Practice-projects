@@ -1,0 +1,2184 @@
+# Backend Project - Complete Structure & Code Flow Explanation
+
+---
+
+## 1. Project Structure
+
+```
+backend/
+├── pom.xml                          ← Maven build file (dependencies & plugins)
+└── src/main/
+    ├── java/com/example/inventory/
+    │   ├── InventoryBackendApplication.java    ← Entry Point (main class)
+    │   ├── config/
+    │   │   └── SecurityConfig.java             ← Spring Security + CORS + JWT config
+    │   ├── controller/
+    │   │   ├── AuthController.java             ← Authentication APIs (login, signup, users)
+    │   │   ├── ProductController.java          ← Product CRUD APIs
+    │   │   └── SaleController.java             ← Sales CRUD APIs
+    │   ├── dto/
+    │   │   ├── LoginRequest.java               ← Login request body structure
+    │   │   ├── LoginResponse.java              ← Login response (token + user info)
+    │   │   ├── MessageResponse.java            ← Generic message response
+    │   │   └── SignupRequest.java              ← Registration request body structure
+    │   ├── entity/
+    │   │   ├── Product.java                    ← Product database table mapping
+    │   │   ├── Role.java                       ← Role database table mapping
+    │   │   ├── Sale.java                       ← Sale database table mapping
+    │   │   └── User.java                       ← User database table mapping
+    │   ├── repository/
+    │   │   ├── ProductRepository.java          ← Product data access layer
+    │   │   ├── RoleRepository.java             ← Role data access layer
+    │   │   ├── SaleRepository.java             ← Sale data access layer
+    │   │   └── UserRepository.java             ← User data access layer
+    │   └── security/
+    │       ├── CustomUserDetailsService.java   ← Loads user from DB for Spring Security
+    │       ├── JwtAuthenticationFilter.java    ← Intercepts requests & validates JWT
+    │       └── JwtUtils.java                   ← JWT token generation & validation
+    └── resources/
+        └── application.properties              ← App configuration (DB, JWT, server port)
+```
+
+---
+
+## 2. Technology Stack (pom.xml)
+
+| Dependency | Purpose |
+|-----------|---------|
+| `spring-boot-starter-web` | REST API support (controllers, HTTP handling) |
+| `spring-boot-starter-data-jpa` | Database access via Hibernate ORM |
+| `spring-boot-starter-security` | Authentication & authorization framework |
+| `spring-boot-starter-validation` | Request body validation (`@NotBlank`, `@Email`) |
+| `mysql-connector-j` | MySQL database driver |
+| `jjwt-api`, `jjwt-impl`, `jjwt-jackson` | JWT token creation & parsing (v0.12.5) |
+| `lombok` | Auto-generates getters/setters/constructors |
+
+- **Java Version**: 17
+- **Spring Boot Version**: 3.3.0
+
+---
+
+## 3. Configuration (application.properties)
+
+```properties
+# MySQL Database
+spring.datasource.url=jdbc:mysql://localhost:3306/inventory_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+spring.datasource.username=root
+spring.datasource.password=yuvan
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+# JPA/Hibernate - auto creates/updates tables
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+
+# Server runs on port 8088
+server.port=8088
+
+# JWT secret key and 24-hour expiration
+app.jwtSecret=MySuperSecretKeyForJWTTokenGenerationInSpringBootApplication12345
+app.jwtExpirationMs=86400000
+
+# Debug logging enabled
+logging.level.com.example=DEBUG
+logging.level.org.springframework.security=DEBUG
+```
+
+**What each property does:**
+- `ddl-auto=update` → Hibernate automatically creates/modifies database tables based on entity classes
+- `show-sql=true` → Prints SQL queries to console for debugging
+- `server.port=8088` → Backend listens on port 8088
+- `jwtExpirationMs=86400000` → Token expires after 24 hours (in milliseconds)
+
+---
+
+## 4. Entry Point
+
+### `InventoryBackendApplication.java`
+
+```java
+@SpringBootApplication
+public class InventoryBackendApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(InventoryBackendApplication.class, args);
+    }
+}
+```
+
+**What happens when this runs:**
+1. Spring Boot scans all packages under `com.example.inventory`
+2. Finds all `@Controller`, `@Service`, `@Repository`, `@Component`, `@Configuration` classes
+3. Creates instances (beans) of all these classes and wires them together
+4. Starts embedded Tomcat server on port 8088
+5. Hibernate connects to MySQL and creates/updates tables
+6. Application is ready to accept HTTP requests
+
+---
+
+## 5. Entity Layer (Database Tables)
+
+Entities map Java classes to MySQL tables using JPA annotations.
+
+### `Product.java`
+
+```java
+@Entity
+@Table(name = "products")
+@Data @NoArgsConstructor @AllArgsConstructor
+public class Product {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;              // Auto-increment primary key
+
+    @Column(nullable = false)
+    private String name;          // Product name (required)
+
+    private String description;   // Optional description
+    private String manufacturer;  // Optional manufacturer
+    private Integer quantity;     // Stock quantity
+    private Double price;         // Unit price
+}
+```
+
+**Generated MySQL Table:**
+```sql
+CREATE TABLE products (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(255),
+    manufacturer VARCHAR(255),
+    quantity INT,
+    price DOUBLE
+);
+```
+
+---
+
+### `User.java`
+
+```java
+@Entity
+@Table(name = "users", uniqueConstraints = @UniqueConstraint(columnNames = "email"))
+@Data @NoArgsConstructor @AllArgsConstructor
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String firstName;
+
+    @Column(nullable = false)
+    private String lastName;
+
+    @Column(nullable = false, unique = true)
+    private String email;         // Used as username for authentication
+
+    @Column(nullable = false)
+    private String password;      // Stored as BCrypt hash
+
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(name = "user_roles",
+            joinColumns = @JoinColumn(name = "user_id"),
+            inverseJoinColumns = @JoinColumn(name = "role_id"))
+    private Set<Role> roles = new HashSet<>();  // User can have multiple roles
+}
+```
+
+**What `@ManyToMany` does:**
+- Creates a junction table `user_roles` with columns `user_id` and `role_id`
+- One user can have many roles, one role can belong to many users
+- `FetchType.EAGER` means roles are loaded immediately when user is fetched
+
+---
+
+### `Role.java`
+
+```java
+@Entity
+@Table(name = "roles")
+@Data @NoArgsConstructor @AllArgsConstructor
+public class Role {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true)
+    private String name;  // e.g., "ROLE_USER", "ROLE_ADMIN"
+}
+```
+
+---
+
+### `Sale.java`
+
+```java
+@Entity
+@Table(name = "sales")
+@Data @NoArgsConstructor @AllArgsConstructor
+public class Sale {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String name;      // Month name (e.g., "January")
+
+    private Integer sales;    // Number of sales in that month
+    private Double revenue;   // Total revenue for that month
+}
+```
+
+---
+
+## 6. Repository Layer (Data Access)
+
+Repositories provide database CRUD operations without writing SQL manually.
+
+### `ProductRepository.java`
+
+```java
+public interface ProductRepository extends JpaRepository<Product, Long> {
+}
+```
+
+**Inherited methods from JpaRepository:**
+- `findAll()` → SELECT * FROM products
+- `findById(Long id)` → SELECT * FROM products WHERE id = ?
+- `save(Product p)` → INSERT or UPDATE
+- `deleteById(Long id)` → DELETE FROM products WHERE id = ?
+
+---
+
+### `UserRepository.java`
+
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);   // Custom: SELECT * FROM users WHERE email = ?
+    boolean existsByEmail(String email);         // Custom: SELECT COUNT(*) > 0 FROM users WHERE email = ?
+}
+```
+
+**How custom methods work:**
+- Spring Data JPA parses the method name: `findBy` + `Email` → generates SQL automatically
+- `existsBy` + `Email` → returns true/false based on existence
+
+---
+
+### `RoleRepository.java`
+
+```java
+public interface RoleRepository extends JpaRepository<Role, Long> {
+    Optional<Role> findByName(String name);  // Find role by name (e.g., "ROLE_USER")
+}
+```
+
+---
+
+### `SaleRepository.java`
+
+```java
+public interface SaleRepository extends JpaRepository<Sale, Long> {
+}
+```
+
+---
+
+## 7. DTO Layer (Data Transfer Objects)
+
+DTOs define the shape of data sent between frontend and backend (request/response bodies).
+
+### `LoginRequest.java`
+
+```java
+@Data
+public class LoginRequest {
+    @NotBlank(message = "Email is required")
+    @Email(message = "Invalid email format")
+    private String email;
+
+    @NotBlank(message = "Password is required")
+    private String password;
+}
+```
+
+**Validation annotations:**
+- `@NotBlank` → field cannot be null or empty string
+- `@Email` → must match email format (contains `@`)
+- If validation fails, Spring returns 400 Bad Request with error messages
+
+---
+
+### `SignupRequest.java`
+
+```java
+@Data
+public class SignupRequest {
+    @NotBlank(message = "First name is required")
+    private String firstName;
+
+    @NotBlank(message = "Last name is required")
+    private String lastName;
+
+    @NotBlank(message = "Email is required")
+    @Email(message = "Invalid email format")
+    private String email;
+
+    @NotBlank(message = "Password is required")
+    private String password;
+}
+```
+
+---
+
+### `LoginResponse.java`
+
+```java
+@Data @AllArgsConstructor
+public class LoginResponse {
+    private String token;      // JWT token (null when returning profile)
+    private String email;
+    private String firstName;
+    private String lastName;
+}
+```
+
+---
+
+### `MessageResponse.java`
+
+```java
+@Data @AllArgsConstructor
+public class MessageResponse {
+    private String message;  // e.g., "User registered successfully"
+}
+```
+
+---
+
+## 8. Security Layer (JWT Authentication)
+
+### How JWT Authentication Works (Step by Step)
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    REQUEST LIFECYCLE                                      │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  HTTP Request arrives at port 8088                                       │
+│       │                                                                  │
+│       ▼                                                                  │
+│  [CORS Filter] — Checks if origin is allowed (localhost:3000/5173)       │
+│       │                                                                  │
+│       ▼                                                                  │
+│  [JwtAuthenticationFilter] — Extracts & validates JWT from header        │
+│       │                                                                  │
+│       ├── Token valid → Sets Authentication in SecurityContext           │
+│       │                                                                  │
+│       └── No token / Invalid → SecurityContext remains empty             │
+│       │                                                                  │
+│       ▼                                                                  │
+│  [SecurityFilterChain] — Checks authorization rules                      │
+│       │                                                                  │
+│       ├── Public endpoint (/api/auth/login, /signup) → Allow through     │
+│       │                                                                  │
+│       ├── Authenticated user → Allow through to controller               │
+│       │                                                                  │
+│       └── No authentication → Return 401 Unauthorized                    │
+│       │                                                                  │
+│       ▼                                                                  │
+│  [Controller] — Processes request, returns response                      │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### `SecurityConfig.java` — Full Explanation
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+
+    // Creates the JWT filter bean
+    @Bean
+    public JwtAuthenticationFilter jwtAuthenticationFilter() {
+        return new JwtAuthenticationFilter();
+    }
+
+    // BCrypt password encoder (hashes passwords with salt)
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    // Authentication provider: uses our UserDetailsService + BCrypt
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        authProvider.setUserDetailsService(userDetailsService);  // How to find users
+        authProvider.setPasswordEncoder(passwordEncoder());       // How to compare passwords
+        return authProvider;
+    }
+
+    // Exposes AuthenticationManager for use in AuthController
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+
+    // CORS: which frontend origins can access the backend
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.asList(
+            "http://localhost:3000",    // Vite dev server
+            "http://localhost:5173"     // Vite alternate port
+        ));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        configuration.setAllowedHeaders(List.of("*"));     // Allow all headers (including Authorization)
+        configuration.setAllowCredentials(true);           // Allow cookies/auth headers
+        // ...
+    }
+
+    // Main security configuration
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .cors(...)              // Enable CORS with our config
+            .csrf(csrf.disable())   // Disable CSRF (using JWT instead)
+            .sessionManagement(STATELESS)  // No server sessions (JWT is stateless)
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/login", "/api/auth/signup", "/api/auth/register", "/error")
+                    .permitAll()    // These endpoints don't need authentication
+                .anyRequest()
+                    .authenticated() // Everything else REQUIRES valid JWT
+            )
+            .authenticationProvider(authenticationProvider())
+            .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
+            // ↑ Our JWT filter runs BEFORE Spring's default username/password filter
+    }
+}
+```
+
+---
+
+### `JwtUtils.java` — Token Generation & Validation
+
+```java
+@Component
+public class JwtUtils {
+
+    @Value("${app.jwtSecret}")        // Reads from application.properties
+    private String jwtSecret;
+
+    @Value("${app.jwtExpirationMs}")  // 86400000 ms = 24 hours
+    private long jwtExpirationMs;
+
+    // Creates the HMAC-SHA signing key from the secret
+    private SecretKey getSigningKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(
+            Base64.getEncoder().encodeToString(jwtSecret.getBytes()));
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    // GENERATE TOKEN after successful login
+    public String generateJwtToken(Authentication authentication) {
+        UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
+        return Jwts.builder()
+            .subject(userPrincipal.getUsername())   // Email goes into token
+            .issuedAt(new Date())                   // Current timestamp
+            .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))  // +24 hours
+            .signWith(getSigningKey())              // Sign with HMAC-SHA
+            .compact();                            // Build token string
+    }
+
+    // EXTRACT email from token
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parser()
+            .verifyWith(getSigningKey())
+            .build()
+            .parseSignedClaims(token)
+            .getPayload()
+            .getSubject();   // Returns the email that was stored
+    }
+
+    // VALIDATE token (signature + expiration)
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(authToken);
+            return true;  // Token is valid
+        } catch (SecurityException e) { /* invalid signature */ }
+          catch (MalformedJwtException e) { /* corrupted token */ }
+          catch (ExpiredJwtException e) { /* token expired */ }
+          catch (UnsupportedJwtException e) { /* wrong format */ }
+          catch (IllegalArgumentException e) { /* empty token */ }
+        return false;  // Token is invalid
+    }
+}
+```
+
+---
+
+### `JwtAuthenticationFilter.java` — Request Interceptor
+
+```java
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    // Runs ONCE per HTTP request
+
+    @Autowired private JwtUtils jwtUtils;
+    @Autowired private CustomUserDetailsService userDetailsService;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) {
+        try {
+            // Step 1: Extract token from "Authorization: Bearer <token>" header
+            String jwt = parseJwt(request);
+
+            // Step 2: If token exists and is valid
+            if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
+
+                // Step 3: Get email from token
+                String username = jwtUtils.getUserNameFromJwtToken(jwt);
+
+                // Step 4: Load full user details from database
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+
+                // Step 5: Create authentication object with user's roles
+                UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(
+                        userDetails, null, userDetails.getAuthorities());
+
+                // Step 6: Set authentication in Spring Security context
+                // Now the request is "authenticated" for downstream processing
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Cannot set user authentication: {}", e.getMessage());
+        }
+
+        // Step 7: Continue to next filter / controller
+        filterChain.doFilter(request, response);
+    }
+
+    // Extracts "Bearer xxx" → "xxx"
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith("Bearer ")) {
+            return headerAuth.substring(7);  // Remove "Bearer " prefix
+        }
+        return null;
+    }
+}
+```
+
+---
+
+### `CustomUserDetailsService.java` — User Loader
+
+```java
+@Service
+public class CustomUserDetailsService implements UserDetailsService {
+
+    @Autowired private UserRepository userRepository;
+
+    // Called by JwtAuthenticationFilter and AuthenticationManager
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        // Find user in database by email
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + email));
+
+        // Convert to Spring Security's UserDetails format
+        return new org.springframework.security.core.userdetails.User(
+            user.getEmail(),      // username
+            user.getPassword(),   // hashed password
+            user.getRoles().stream()
+                .map(role -> new SimpleGrantedAuthority(role.getName()))  // ROLE_USER, ROLE_ADMIN
+                .collect(Collectors.toList())
+        );
+    }
+}
+```
+
+---
+
+## 9. Controller Layer (API Endpoints)
+
+### `AuthController.java` — Authentication & User Management
+
+#### POST `/api/auth/signup` — Register New User
+
+```
+Flow:
+1. Receive SignupRequest (firstName, lastName, email, password)
+2. Validate: @NotBlank, @Email annotations
+3. Check if email already exists → 400 "Email already exists"
+4. Create User entity
+5. Hash password with BCrypt
+6. Find or create "ROLE_USER" role
+7. Assign role to user
+8. Save user to database
+9. Return 200 "User registered successfully"
+```
+
+#### POST `/api/auth/login` — Authenticate & Get Token
+
+```
+Flow:
+1. Receive LoginRequest (email, password)
+2. AuthenticationManager authenticates:
+   a. CustomUserDetailsService loads user by email
+   b. BCrypt compares provided password with stored hash
+   c. If mismatch → throws BadCredentialsException → 401
+3. If valid → Set authentication in SecurityContext
+4. JwtUtils.generateJwtToken() → creates JWT with email + 24h expiry
+5. Fetch user details from DB
+6. Return LoginResponse { token, email, firstName, lastName }
+```
+
+#### GET `/api/auth/profile` — Get Current User Profile
+
+```
+Flow:
+1. JWT filter already validated token and set authentication
+2. Get email from SecurityContext
+3. Find user by email in database
+4. Return user info (without token)
+```
+
+#### PUT `/api/auth/profile` — Update Profile
+
+```
+Flow:
+1. Get current user's email from SecurityContext
+2. Find user in database
+3. Update firstName/lastName if provided
+4. If new password provided → hash with BCrypt → save
+5. Return "Profile updated successfully"
+```
+
+#### GET `/api/auth/users` — List All Users
+
+```
+Flow:
+1. Fetch all users from database
+2. Map to LoginResponse DTOs (hide passwords)
+3. Return list
+```
+
+#### POST `/api/auth/users` — Create User (Admin)
+
+```
+Flow:
+1. Same as signup but called by admin
+2. Check email uniqueness
+3. Create user with hashed password + ROLE_USER
+4. Return "User created successfully"
+```
+
+#### PUT `/api/auth/users/{id}` — Update User by ID
+
+```
+Flow:
+1. Find user by ID
+2. Update fields if provided (firstName, lastName, email, password)
+3. Hash new password if changed
+4. Save and return success
+```
+
+#### DELETE `/api/auth/users/{id}` — Delete User
+
+```
+Flow:
+1. Delete user by ID from database
+2. Return "User deleted successfully"
+```
+
+---
+
+### `ProductController.java` — Product CRUD
+
+#### GET `/api/products` — List All Products
+
+```java
+@GetMapping
+public ResponseEntity<List<Product>> getAllProducts() {
+    return ResponseEntity.ok(productRepository.findAll());
+    // SQL: SELECT * FROM products
+}
+```
+
+#### GET `/api/products/{id}` — Get Single Product
+
+```java
+@GetMapping("/{id}")
+public ResponseEntity<Product> getProduct(@PathVariable Long id) {
+    Product product = productRepository.findById(id)
+        .orElseThrow(() -> new RuntimeException("Product not found"));
+    // SQL: SELECT * FROM products WHERE id = ?
+    return ResponseEntity.ok(product);
+}
+```
+
+#### POST `/api/products` — Create Product
+
+```java
+@PostMapping
+public ResponseEntity<Product> createProduct(@RequestBody Product product) {
+    return ResponseEntity.ok(productRepository.save(product));
+    // SQL: INSERT INTO products (name, description, manufacturer, quantity, price) VALUES (?, ?, ?, ?, ?)
+}
+```
+
+#### PUT `/api/products/{id}` — Update Product
+
+```java
+@PutMapping("/{id}")
+public ResponseEntity<Product> updateProduct(@PathVariable Long id, @RequestBody Product product) {
+    Product existing = productRepository.findById(id)
+        .orElseThrow(() -> new RuntimeException("Product not found"));
+
+    // Only update fields that are provided (not null)
+    if (product.getName() != null) existing.setName(product.getName());
+    if (product.getDescription() != null) existing.setDescription(product.getDescription());
+    if (product.getManufacturer() != null) existing.setManufacturer(product.getManufacturer());
+    if (product.getQuantity() != null) existing.setQuantity(product.getQuantity());
+    if (product.getPrice() != null) existing.setPrice(product.getPrice());
+
+    return ResponseEntity.ok(productRepository.save(existing));
+    // SQL: UPDATE products SET name=?, description=?, ... WHERE id=?
+}
+```
+
+#### DELETE `/api/products/{id}` — Delete Product
+
+```java
+@DeleteMapping("/{id}")
+public ResponseEntity<?> deleteProduct(@PathVariable Long id) {
+    productRepository.deleteById(id);
+    // SQL: DELETE FROM products WHERE id = ?
+    return ResponseEntity.ok().build();
+}
+```
+
+---
+
+### `SaleController.java` — Sales CRUD
+
+Same pattern as ProductController:
+
+| Method | Endpoint | SQL Operation |
+|--------|----------|---------------|
+| GET | `/api/sales` | SELECT * FROM sales |
+| POST | `/api/sales` | INSERT INTO sales |
+| PUT | `/api/sales/{id}` | UPDATE sales WHERE id = ? |
+| DELETE | `/api/sales/{id}` | DELETE FROM sales WHERE id = ? |
+
+---
+
+## 10. Complete Flow Diagrams
+
+### Flow 1: User Registration
+
+```
+Frontend                          Backend                              Database
+   │                                │                                    │
+   │ POST /api/auth/signup          │                                    │
+   │ {firstName, lastName,          │                                    │
+   │  email, password}              │                                    │
+   │───────────────────────────────►│                                    │
+   │                                │                                    │
+   │                                │ 1. Validate @NotBlank, @Email      │
+   │                                │ 2. Check email exists?             │
+   │                                │────────────────────────────────────►│
+   │                                │◄────────────────────────────────────│ false
+   │                                │ 3. Hash password (BCrypt)          │
+   │                                │ 4. Find/Create ROLE_USER           │
+   │                                │────────────────────────────────────►│
+   │                                │◄────────────────────────────────────│
+   │                                │ 5. Save user + role                │
+   │                                │────────────────────────────────────►│
+   │                                │◄────────────────────────────────────│ saved
+   │                                │                                    │
+   │◄───────────────────────────────│                                    │
+   │ 200: "User registered          │                                    │
+   │       successfully"             │                                    │
+```
+
+---
+
+### Flow 2: User Login
+
+```
+Frontend                          Backend                              Database
+   │                                │                                    │
+   │ POST /api/auth/login           │                                    │
+   │ {email, password}              │                                    │
+   │───────────────────────────────►│                                    │
+   │                                │                                    │
+   │                     ┌──────────┴──────────┐                         │
+   │                     │ AuthenticationManager│                         │
+   │                     │    .authenticate()   │                         │
+   │                     └──────────┬──────────┘                         │
+   │                                │                                    │
+   │                                │ 1. loadUserByUsername(email)        │
+   │                                │────────────────────────────────────►│
+   │                                │◄────────────────────────────────────│ User entity
+   │                                │                                    │
+   │                                │ 2. BCrypt.matches(password, hash)  │
+   │                                │    ✓ Match = authenticated         │
+   │                                │                                    │
+   │                                │ 3. Generate JWT token              │
+   │                                │    subject = email                 │
+   │                                │    expiry = now + 24 hours         │
+   │                                │    sign with HMAC-SHA256           │
+   │                                │                                    │
+   │◄───────────────────────────────│                                    │
+   │ 200: {token, email,            │                                    │
+   │       firstName, lastName}     │                                    │
+   │                                │                                    │
+   │ Store token in localStorage    │                                    │
+```
+
+---
+
+### Flow 3: Authenticated Request (Get Products)
+
+```
+Frontend                     JwtFilter                   SecurityChain              Controller           Database
+   │                            │                            │                        │                    │
+   │ GET /api/products          │                            │                        │                    │
+   │ Header: Bearer <token>     │                            │                        │                    │
+   │───────────────────────────►│                            │                        │                    │
+   │                            │                            │                        │                    │
+   │                            │ 1. Extract token from      │                        │                    │
+   │                            │    Authorization header    │                        │                    │
+   │                            │                            │                        │                    │
+   │                            │ 2. validateJwtToken()      │                        │                    │
+   │                            │    - Check signature       │                        │                    │
+   │                            │    - Check not expired     │                        │                    │
+   │                            │                            │                        │                    │
+   │                            │ 3. getUserNameFromJwtToken()                        │                    │
+   │                            │    → extracts email        │                        │                    │
+   │                            │                            │                        │                    │
+   │                            │ 4. loadUserByUsername(email)                        │                    │
+   │                            │─────────────────────────────────────────────────────────────────────────►│
+   │                            │◄─────────────────────────────────────────────────────────────────────────│
+   │                            │                            │                        │                    │
+   │                            │ 5. Set Authentication      │                        │                    │
+   │                            │    in SecurityContext      │                        │                    │
+   │                            │───────────────────────────►│                        │                    │
+   │                            │                            │                        │                    │
+   │                            │                            │ 6. Is authenticated?   │                    │
+   │                            │                            │    YES → allow         │                    │
+   │                            │                            │───────────────────────►│                    │
+   │                            │                            │                        │                    │
+   │                            │                            │                        │ 7. findAll()       │
+   │                            │                            │                        │───────────────────►│
+   │                            │                            │                        │◄───────────────────│
+   │                            │                            │                        │  [products]        │
+   │◄──────────────────────────────────────────────────────────────────────────────────│                    │
+   │  200: [{id, name, ...}, ...]                            │                        │                    │
+```
+
+---
+
+### Flow 4: Unauthenticated Request (Rejected)
+
+```
+Frontend                     JwtFilter                   SecurityChain
+   │                            │                            │
+   │ GET /api/products          │                            │
+   │ (No Authorization header)  │                            │
+   │───────────────────────────►│                            │
+   │                            │                            │
+   │                            │ 1. No token found          │
+   │                            │    → skip authentication   │
+   │                            │───────────────────────────►│
+   │                            │                            │
+   │                            │                            │ 2. Is /api/products
+   │                            │                            │    in permitAll list?
+   │                            │                            │    NO
+   │                            │                            │
+   │                            │                            │ 3. Is user authenticated?
+   │                            │                            │    NO → 401 UNAUTHORIZED
+   │◄────────────────────────────────────────────────────────│
+   │  401 Unauthorized          │                            │
+```
+
+---
+
+## 11. Database Schema Relationships
+
+```
+┌──────────────┐     ┌───────────────┐     ┌──────────────┐
+│    users     │     │  user_roles   │     │    roles     │
+├──────────────┤     ├───────────────┤     ├──────────────┤
+│ id (PK)      │◄────│ user_id (FK)  │     │ id (PK)      │
+│ first_name   │     │ role_id (FK)  │────►│ name         │
+│ last_name    │     └───────────────┘     └──────────────┘
+│ email (UQ)   │
+│ password     │
+└──────────────┘
+
+┌──────────────┐     ┌──────────────┐
+│   products   │     │    sales     │
+├──────────────┤     ├──────────────┤
+│ id (PK)      │     │ id (PK)      │
+│ name         │     │ name         │
+│ description  │     │ sales        │
+│ manufacturer │     │ revenue      │
+│ quantity     │     └──────────────┘
+│ price        │
+└──────────────┘
+```
+
+---
+
+## 12. How to Run the Backend
+
+### Prerequisites
+- Java 17 installed
+- MySQL running on port 3306
+- Database `inventory_db` created
+
+### Steps
+```bash
+# Navigate to backend directory
+cd backend
+
+# Build the project (downloads dependencies)
+mvn clean install
+
+# Run the application
+mvn spring-boot:run
+
+# OR run the JAR directly
+java -jar target/inventory-backend-0.0.1-SNAPSHOT.jar
+```
+
+### Verify it's running
+```
+GET http://localhost:8088/api/auth/login → Should return 405 (Method Not Allowed, since it expects POST)
+```
+
+---
+
+## 13. API Summary Table
+
+| # | Method | Endpoint | Auth Required | Request Body | Response |
+|---|--------|----------|:---:|------|------|
+| 1 | POST | `/api/auth/signup` | ❌ | SignupRequest | MessageResponse |
+| 2 | POST | `/api/auth/login` | ❌ | LoginRequest | LoginResponse (with token) |
+| 3 | GET | `/api/auth/profile` | ✅ | — | LoginResponse |
+| 4 | PUT | `/api/auth/profile` | ✅ | SignupRequest (partial) | MessageResponse |
+| 5 | GET | `/api/auth/users` | ✅ | — | List\<LoginResponse\> |
+| 6 | POST | `/api/auth/users` | ✅ | SignupRequest | MessageResponse |
+| 7 | PUT | `/api/auth/users/{id}` | ✅ | SignupRequest (partial) | MessageResponse |
+| 8 | DELETE | `/api/auth/users/{id}` | ✅ | — | MessageResponse |
+| 9 | GET | `/api/products` | ✅ | — | List\<Product\> |
+| 10 | GET | `/api/products/{id}` | ✅ | — | Product |
+| 11 | POST | `/api/products` | ✅ | Product | Product |
+| 12 | PUT | `/api/products/{id}` | ✅ | Product (partial) | Product |
+| 13 | DELETE | `/api/products/{id}` | ✅ | — | 200 OK |
+| 14 | GET | `/api/sales` | ✅ | — | List\<Sale\> |
+| 15 | POST | `/api/sales` | ✅ | Sale | Sale |
+| 16 | PUT | `/api/sales/{id}` | ✅ | Sale (partial) | Sale |
+| 17 | DELETE | `/api/sales/{id}` | ✅ | — | 200 OK |
+
+---
+
+## 14. Lombok Annotations Explained
+
+Since Lombok is used throughout, here's what each annotation generates:
+
+| Annotation | Generates |
+|-----------|-----------|
+| `@Data` | getters + setters + toString + equals + hashCode |
+| `@NoArgsConstructor` | Empty constructor: `public Product() {}` |
+| `@AllArgsConstructor` | Constructor with all fields: `public Product(Long id, String name, ...)` |
+
+This means you DON'T see getters/setters in the code, but they exist at compile time.
+
+---
+
+## 15. Spring Annotations Quick Reference
+
+| Annotation | Purpose |
+|-----------|---------|
+| `@SpringBootApplication` | Marks the main class, enables auto-config |
+| `@RestController` | Class handles HTTP requests, returns JSON |
+| `@RequestMapping("/api/...")` | Base URL path for all methods in class |
+| `@GetMapping` | Handles GET requests |
+| `@PostMapping` | Handles POST requests |
+| `@PutMapping("/{id}")` | Handles PUT requests with path variable |
+| `@DeleteMapping("/{id}")` | Handles DELETE requests with path variable |
+| `@PathVariable` | Extracts value from URL path (e.g., `/products/5` → id=5) |
+| `@RequestBody` | Parses JSON body into Java object |
+| `@Valid` | Triggers validation annotations on the DTO |
+| `@Autowired` | Automatically injects dependency (Spring creates the instance) |
+| `@Entity` | Marks class as a database table |
+| `@Table(name="...")` | Specifies table name |
+| `@Id` | Primary key field |
+| `@GeneratedValue(IDENTITY)` | Auto-increment |
+| `@Column(nullable=false)` | NOT NULL constraint |
+| `@ManyToMany` | Many-to-many relationship (creates junction table) |
+| `@Configuration` | Class provides Spring configuration beans |
+| `@Bean` | Method returns an object managed by Spring |
+| `@Component` | Generic Spring-managed class |
+| `@Service` | Business logic class (same as @Component, semantic) |
+| `@Value("${...}")` | Injects value from application.properties |
+
+---
+
+## 16. DETAILED CODE WALKTHROUGH — Every File With Line-by-Line Explanation
+
+---
+
+### 16.1 `InventoryBackendApplication.java` — THE STARTING POINT
+
+```java
+package com.example.inventory;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication  // ← This ONE annotation does 3 things:
+                        //    1. @Configuration — this class can define beans
+                        //    2. @EnableAutoConfiguration — auto-configures Spring based on dependencies
+                        //    3. @ComponentScan — scans com.example.inventory.* for annotated classes
+public class InventoryBackendApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(InventoryBackendApplication.class, args);
+        // ↑ This triggers the entire Spring Boot startup:
+        //   - Creates ApplicationContext (the container for all beans)
+        //   - Scans and registers all @Controller, @Service, @Repository, @Component, @Configuration
+        //   - Connects to MySQL using properties from application.properties
+        //   - Hibernate creates/updates tables (ddl-auto=update)
+        //   - Starts embedded Tomcat on port 8088
+        //   - Registers all REST endpoints from controllers
+    }
+}
+```
+
+**What "works" here:**
+- `SpringApplication.run()` is the engine that boots everything up
+- Without this, nothing works — no server, no database, no APIs
+- It reads `application.properties` to know WHERE the database is, WHICH port to use, etc.
+
+---
+
+### 16.2 `SecurityConfig.java` — THE GATEKEEPER (Full Actual Code)
+
+```java
+package com.example.inventory.config;
+
+import com.example.inventory.security.CustomUserDetailsService;
+import com.example.inventory.security.JwtAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+import java.util.List;
+
+@Configuration      // ← Tells Spring: "This class contains bean definitions"
+@EnableWebSecurity  // ← Activates Spring Security's web protection
+public class SecurityConfig {
+
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+    // ↑ Spring injects our custom user loader service
+
+    // ═══════════════════════════════════════════════════════════
+    // BEAN 1: JWT Filter — intercepts EVERY request
+    // ═══════════════════════════════════════════════════════════
+    @Bean
+    public JwtAuthenticationFilter jwtAuthenticationFilter() {
+        return new JwtAuthenticationFilter();
+        // Creates an instance that will check Authorization header on every request
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BEAN 2: Password Encoder — HOW passwords are hashed
+    // ═══════════════════════════════════════════════════════════
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+        // BCrypt adds a random salt + hashes the password
+        // "password123" → "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+        // Same password → different hash each time (because of random salt)
+        // Cannot be reversed (one-way function)
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BEAN 3: Authentication Provider — WHO verifies credentials
+    // ═══════════════════════════════════════════════════════════
+    @Bean
+    public DaoAuthenticationProvider authenticationProvider() {
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+        authProvider.setUserDetailsService(userDetailsService);
+        // ↑ "When you need to find a user, use THIS service" (queries DB by email)
+        authProvider.setPasswordEncoder(passwordEncoder());
+        // ↑ "When you need to compare passwords, use BCrypt"
+        return authProvider;
+        // This provider is used when AuthController calls authenticationManager.authenticate()
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BEAN 4: Authentication Manager — used by AuthController for login
+    // ═══════════════════════════════════════════════════════════
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+        // Exposes the auth manager so AuthController can @Autowired it
+        // Used in: authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(email, password))
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BEAN 5: CORS Configuration — which frontends can call us
+    // ═══════════════════════════════════════════════════════════
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        configuration.setAllowedOrigins(Arrays.asList(
+            "http://localhost:3000",    // React Vite dev server (default)
+            "http://localhost:5173"     // React Vite alternate port
+        ));
+        // ↑ ONLY these origins can make API calls to us
+        // Any other origin (e.g., http://evil-site.com) will be BLOCKED by browser
+
+        configuration.setAllowedMethods(Arrays.asList(
+            "GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"
+        ));
+        // ↑ Which HTTP methods are allowed
+
+        configuration.setAllowedHeaders(List.of("*"));
+        // ↑ Allow ALL headers (especially "Authorization" for JWT)
+
+        configuration.setAllowCredentials(true);
+        // ↑ Allow cookies and Authorization headers
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        // ↑ Apply these CORS rules to ALL URL paths
+        return source;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // BEAN 6: Security Filter Chain — THE MAIN SECURITY RULES
+    // ═══════════════════════════════════════════════════════════
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            // ↑ Apply our CORS rules (allow localhost:3000/5173)
+
+            .csrf(csrf -> csrf.disable())
+            // ↑ Disable CSRF protection
+            // WHY? Because we use JWT tokens (not cookies) for auth
+            // CSRF attacks exploit cookies; JWT in Authorization header is immune
+
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            // ↑ Don't create server-side sessions
+            // Each request is independent — auth comes from JWT token in header
+            // Server doesn't remember who you are between requests
+
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/login", "/api/auth/signup", "/api/auth/register", "/error")
+                    .permitAll()
+                // ↑ These URLs DON'T require authentication (anyone can access)
+                // Login/Signup must be public (user can't have a token before logging in!)
+
+                .anyRequest().authenticated()
+                // ↑ EVERYTHING ELSE requires a valid JWT token
+                // /api/products, /api/sales, /api/auth/profile, etc.
+            )
+
+            .authenticationProvider(authenticationProvider())
+            // ↑ Use our provider (UserDetailsService + BCrypt) for authentication
+
+            .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
+            // ↑ CRITICAL: Run our JWT filter BEFORE Spring's default filter
+            // Order: Request → CORS → JwtFilter → SecurityChain → Controller
+
+        return http.build();
+    }
+}
+```
+
+**What this file controls:**
+| Aspect | What it does |
+|--------|-------------|
+| CORS | Prevents unauthorized websites from calling your API |
+| CSRF disabled | Because JWT tokens are used instead of cookies |
+| Stateless sessions | Server doesn't store user sessions (saves memory) |
+| Public endpoints | Login/Signup accessible without token |
+| Private endpoints | Everything else needs JWT |
+| Filter order | JWT validation happens before authorization check |
+
+---
+
+### 16.3 `JwtUtils.java` — TOKEN FACTORY (Full Actual Code)
+
+```java
+package com.example.inventory.security;
+
+import io.jsonwebtoken.*;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import javax.crypto.SecretKey;
+import java.util.Date;
+
+@Component  // ← Spring manages this class (can be @Autowired elsewhere)
+public class JwtUtils {
+
+    private static final Logger logger = LoggerFactory.getLogger(JwtUtils.class);
+
+    @Value("${app.jwtSecret}")
+    private String jwtSecret;
+    // ↑ Reads "MySuperSecretKeyForJWTTokenGenerationInSpringBootApplication12345"
+    //   from application.properties
+    //   This secret is used to SIGN tokens — if someone doesn't know this secret,
+    //   they CANNOT forge a valid token
+
+    @Value("${app.jwtExpirationMs}")
+    private long jwtExpirationMs;
+    // ↑ Reads 86400000 (24 hours in milliseconds)
+    //   After this time, the token becomes INVALID and user must login again
+
+    // ─────────────────────────────────────────────────
+    // PRIVATE: Creates the cryptographic signing key
+    // ─────────────────────────────────────────────────
+    private SecretKey getSigningKey() {
+        byte[] keyBytes = Decoders.BASE64.decode(
+                java.util.Base64.getEncoder().encodeToString(jwtSecret.getBytes()));
+        return Keys.hmacShaKeyFor(keyBytes);
+        // Converts the string secret into a proper HMAC-SHA cryptographic key
+        // HMAC-SHA256 = Hash-based Message Authentication Code
+        // It ensures the token hasn't been tampered with
+    }
+
+    // ─────────────────────────────────────────────────
+    // PUBLIC: Generate a new JWT token after login
+    // ─────────────────────────────────────────────────
+    public String generateJwtToken(Authentication authentication) {
+        UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
+        // ↑ Get the authenticated user's details (email + roles)
+
+        return Jwts.builder()
+                .subject(userPrincipal.getUsername())
+                // ↑ Token payload: who this token belongs to (email)
+
+                .issuedAt(new Date())
+                // ↑ When was this token created (current time)
+
+                .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
+                // ↑ When does it expire (current time + 24 hours)
+
+                .signWith(getSigningKey())
+                // ↑ Sign the token with our secret key
+                //   If anyone modifies the token content, the signature won't match
+
+                .compact();
+                // ↑ Build the final token string like:
+                //   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyQGVtYWlsLmNvbSIs..."
+    }
+
+    // ─────────────────────────────────────────────────
+    // PUBLIC: Extract email from an existing token
+    // ─────────────────────────────────────────────────
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parser()
+                .verifyWith(getSigningKey())   // Verify signature matches
+                .build()
+                .parseSignedClaims(token)      // Parse the token
+                .getPayload()
+                .getSubject();                 // Extract "subject" (email)
+        // If token is tampered → throws exception
+        // If token is expired → throws ExpiredJwtException
+    }
+
+    // ─────────────────────────────────────────────────
+    // PUBLIC: Check if a token is valid
+    // ─────────────────────────────────────────────────
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parser().verifyWith(getSigningKey()).build().parseSignedClaims(authToken);
+            return true;
+            // ✅ Token signature is valid AND not expired
+        } catch (SecurityException e) {
+            logger.error("Invalid JWT signature: {}", e.getMessage());
+            // Someone tried to forge a token with a different secret
+        } catch (MalformedJwtException e) {
+            logger.error("Invalid JWT token: {}", e.getMessage());
+            // Token format is corrupted/invalid
+        } catch (ExpiredJwtException e) {
+            logger.error("JWT token is expired: {}", e.getMessage());
+            // Token was valid but 24 hours have passed
+        } catch (UnsupportedJwtException e) {
+            logger.error("JWT token is unsupported: {}", e.getMessage());
+            // Token uses an algorithm we don't support
+        } catch (IllegalArgumentException e) {
+            logger.error("JWT claims string is empty: {}", e.getMessage());
+            // Empty/null token
+        }
+        return false;  // ❌ Token is invalid for any reason
+    }
+}
+```
+
+**JWT Token Structure (what's inside the token string):**
+```
+eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyQGVtYWlsLmNvbSIsImlhdCI6MTcxNzY4MzIwMCwiZXhwIjoxNzE3NzY5NjAwfQ.abc123signature
+
+    HEADER                  PAYLOAD (Claims)                                    SIGNATURE
+    ──────                  ────────────────                                    ─────────
+    {                       {                                                   HMAC-SHA256(
+      "alg": "HS256"         "sub": "user@email.com",  ← subject (email)         header + "." + payload,
+    }                         "iat": 1717683200,        ← issued at               secretKey
+                              "exp": 1717769600         ← expires at            )
+                            }
+```
+
+---
+
+### 16.4 `JwtAuthenticationFilter.java` — THE BOUNCER (Full Actual Code)
+
+```java
+package com.example.inventory.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    // ↑ OncePerRequestFilter = Runs exactly ONCE for every HTTP request
+    //   Even if a request passes through multiple filters, this runs only once
+
+    private static final Logger logger = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+
+    @Autowired
+    private JwtUtils jwtUtils;
+    // ↑ Injected: the JWT utility for validating/parsing tokens
+
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+    // ↑ Injected: loads user details from database
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        // This method runs for EVERY HTTP request to the backend
+
+        try {
+            // ─── STEP 1: Extract token from request header ───
+            String jwt = parseJwt(request);
+            // Looks for: "Authorization: Bearer eyJhbGci..."
+            // Returns: "eyJhbGci..." (just the token part)
+            // Returns null if no Authorization header or doesn't start with "Bearer "
+
+            // ─── STEP 2: Validate the token ───
+            if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
+                // Token exists AND is valid (good signature + not expired)
+
+                // ─── STEP 3: Extract user email from token ───
+                String username = jwtUtils.getUserNameFromJwtToken(jwt);
+                // Decodes the JWT payload → gets the "subject" field (email)
+
+                // ─── STEP 4: Load full user info from database ───
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                // Queries: SELECT * FROM users WHERE email = ?
+                // Returns: UserDetails with email, hashed password, roles
+
+                // ─── STEP 5: Create Spring Security authentication ───
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(
+                            userDetails,                    // The user object
+                            null,                          // No credentials needed (already validated)
+                            userDetails.getAuthorities()); // User's roles (ROLE_USER, etc.)
+
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                // Attaches request metadata (IP address, session ID)
+
+                // ─── STEP 6: Set user as "authenticated" for this request ───
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // From this point, Spring Security considers this request AUTHENTICATED
+                // Controllers can access the user via SecurityContextHolder.getContext().getAuthentication()
+            }
+            // If jwt is null or invalid → SecurityContext remains empty → user is NOT authenticated
+
+        } catch (Exception e) {
+            logger.error("Cannot set user authentication: {}", e.getMessage());
+            // If anything goes wrong, user stays unauthenticated
+        }
+
+        // ─── STEP 7: Pass request to next filter / controller ───
+        filterChain.doFilter(request, response);
+        // Whether authenticated or not, the request continues
+        // The SecurityFilterChain (in SecurityConfig) will check if authentication is required
+    }
+
+    // ─── HELPER: Parse JWT from Authorization header ───
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+        // Reads: "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9..."
+
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith("Bearer ")) {
+            return headerAuth.substring(7);  // Remove "Bearer " (7 characters) → just the token
+        }
+        return null;  // No valid Authorization header found
+    }
+}
+```
+
+**When this filter runs — for every request:**
+```
+Request: GET /api/products
+Header: Authorization: Bearer eyJhbGci...xyz
+
+Filter steps:
+1. parseJwt() → extracts "eyJhbGci...xyz"
+2. validateJwtToken() → checks signature & expiry → true
+3. getUserNameFromJwtToken() → "user@email.com"
+4. loadUserByUsername("user@email.com") → User from DB
+5. Create Authentication object with roles
+6. SecurityContextHolder.set(authentication) → REQUEST IS NOW AUTHENTICATED
+7. filterChain.doFilter() → passes to SecurityConfig's rules → allowed → reaches controller
+```
+
+---
+
+### 16.5 `CustomUserDetailsService.java` — THE USER FINDER (Full Actual Code)
+
+```java
+package com.example.inventory.security;
+
+import com.example.inventory.entity.User;
+import com.example.inventory.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Service;
+
+import java.util.stream.Collectors;
+
+@Service  // ← Marks this as a Spring service bean (auto-detected by component scan)
+public class CustomUserDetailsService implements UserDetailsService {
+    // ↑ Implements Spring Security's interface
+    //   Spring Security calls loadUserByUsername() whenever it needs user info
+
+    @Autowired
+    private UserRepository userRepository;
+    // ↑ Injected: provides access to the users table
+
+    @Override
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        // ─── Called in TWO places: ───
+        // 1. JwtAuthenticationFilter → after extracting email from token
+        // 2. DaoAuthenticationProvider → during login authentication
+
+        // ─── Query database for user ───
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + email));
+        // SQL: SELECT * FROM users u LEFT JOIN user_roles ur ON u.id = ur.user_id
+        //      LEFT JOIN roles r ON ur.role_id = r.id WHERE u.email = ?
+        // If user doesn't exist → throws exception → authentication fails
+
+        // ─── Convert OUR User entity to Spring Security's UserDetails ───
+        return new org.springframework.security.core.userdetails.User(
+                user.getEmail(),       // username (Spring Security uses "username" — we use email)
+                user.getPassword(),    // BCrypt hashed password (for login verification)
+                user.getRoles().stream()
+                        .map(role -> new SimpleGrantedAuthority(role.getName()))
+                        // Converts: Set<Role> → List<GrantedAuthority>
+                        // e.g., Role{name="ROLE_USER"} → SimpleGrantedAuthority("ROLE_USER")
+                        .collect(Collectors.toList())
+        );
+        // The returned UserDetails is used by:
+        // - AuthenticationProvider: compares password hash during login
+        // - JwtFilter: creates authentication token with authorities/roles
+    }
+}
+```
+
+**Who calls this service and why:**
+
+| Caller | When | Why |
+|--------|------|-----|
+| `DaoAuthenticationProvider` | During login (`/api/auth/login`) | To load user + compare password hash |
+| `JwtAuthenticationFilter` | On every authenticated request | To load user roles after token validation |
+
+---
+
+### 16.6 `AuthController.java` — AUTHENTICATION APIs (Full Actual Code with Detail)
+
+```java
+package com.example.inventory.controller;
+
+import com.example.inventory.dto.*;
+import com.example.inventory.entity.Role;
+import com.example.inventory.entity.User;
+import com.example.inventory.repository.RoleRepository;
+import com.example.inventory.repository.UserRepository;
+import com.example.inventory.security.JwtUtils;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@RestController           // ← This class handles HTTP requests and returns JSON
+@RequestMapping("/api/auth")  // ← All methods in this class start with "/api/auth"
+public class AuthController {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
+
+    @Autowired private AuthenticationManager authenticationManager;
+    // ↑ From SecurityConfig — used to verify email+password during login
+
+    @Autowired private UserRepository userRepository;
+    // ↑ Access to users table
+
+    @Autowired private RoleRepository roleRepository;
+    // ↑ Access to roles table
+
+    @Autowired private PasswordEncoder passwordEncoder;
+    // ↑ BCrypt encoder from SecurityConfig
+
+    @Autowired private JwtUtils jwtUtils;
+    // ↑ JWT utility for generating tokens
+
+    // ═══════════════════════════════════════════════════════════
+    // SIGNUP — Register a new user account
+    // URL: POST http://localhost:8088/api/auth/signup
+    // Auth: NOT REQUIRED (public endpoint)
+    // ═══════════════════════════════════════════════════════════
+    @PostMapping("/signup")
+    public ResponseEntity<?> registerUser(@Valid @RequestBody SignupRequest signupRequest) {
+        // @Valid → triggers validation on SignupRequest (@NotBlank, @Email)
+        //          If validation fails → Spring returns 400 with error messages automatically
+        // @RequestBody → parses JSON body: {"firstName":"John","lastName":"Doe","email":"...","password":"..."}
+
+        logger.debug("Signup request received for email: {}", signupRequest.getEmail());
+
+        // ─── Check if email already exists ───
+        if (userRepository.existsByEmail(signupRequest.getEmail())) {
+            return ResponseEntity.badRequest()
+                    .body(new MessageResponse("Email already exists"));
+            // HTTP 400: {"message": "Email already exists"}
+        }
+
+        // ─── Create new User entity ───
+        User user = new User();
+        user.setFirstName(signupRequest.getFirstName());
+        user.setLastName(signupRequest.getLastName());
+        user.setEmail(signupRequest.getEmail());
+        user.setPassword(passwordEncoder.encode(signupRequest.getPassword()));
+        // ↑ CRITICAL: Never store plain passwords!
+        //   "password123" → "$2a$10$N9qo8uLOickgx2ZMRZoMye..."
+        //   BCrypt adds random salt so same password → different hash each time
+
+        // ─── Assign default role ───
+        Set<Role> roles = new HashSet<>();
+        Role userRole = roleRepository.findByName("ROLE_USER")
+                .orElseGet(() -> {
+                    // If "ROLE_USER" doesn't exist in DB yet, create it
+                    Role newRole = new Role();
+                    newRole.setName("ROLE_USER");
+                    return roleRepository.save(newRole);
+                    // INSERT INTO roles (name) VALUES ('ROLE_USER')
+                });
+        roles.add(userRole);
+        user.setRoles(roles);
+        // This creates entry in user_roles junction table
+
+        // ─── Save to database ───
+        userRepository.save(user);
+        // INSERT INTO users (first_name, last_name, email, password) VALUES (?, ?, ?, ?)
+        // INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)
+
+        logger.info("User registered successfully: {}", signupRequest.getEmail());
+
+        return ResponseEntity.ok(new MessageResponse("User registered successfully"));
+        // HTTP 200: {"message": "User registered successfully"}
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // LOGIN — Authenticate and get JWT token
+    // URL: POST http://localhost:8088/api/auth/login
+    // Auth: NOT REQUIRED (public endpoint)
+    // ═══════════════════════════════════════════════════════════
+    @PostMapping("/login")
+    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
+        // JSON body: {"email": "user@email.com", "password": "password123"}
+
+        logger.debug("Login request received for email: {}", loginRequest.getEmail());
+
+        // ─── Authenticate credentials ───
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        loginRequest.getEmail(),
+                        loginRequest.getPassword()
+                )
+        );
+        // ↑ THIS IS WHERE THE MAGIC HAPPENS:
+        // 1. AuthenticationManager calls DaoAuthenticationProvider
+        // 2. DaoAuthenticationProvider calls CustomUserDetailsService.loadUserByUsername(email)
+        // 3. CustomUserDetailsService queries DB: SELECT * FROM users WHERE email = ?
+        // 4. DaoAuthenticationProvider calls BCrypt.matches(providedPassword, storedHash)
+        // 5. If password matches → returns Authentication object (success!)
+        // 6. If password doesn't match → throws BadCredentialsException → Spring returns 401
+
+        // ─── Set authentication in security context ───
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        // ─── Generate JWT token ───
+        String jwt = jwtUtils.generateJwtToken(authentication);
+        // Creates token with: subject=email, issuedAt=now, expiration=now+24h
+        // Signs with HMAC-SHA256 secret key
+
+        // ─── Get user info for response ───
+        User user = userRepository.findByEmail(loginRequest.getEmail())
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        logger.info("Login successful for user: {}", loginRequest.getEmail());
+
+        // ─── Return token + user info ───
+        return ResponseEntity.ok(new LoginResponse(
+                jwt,                  // The JWT token string
+                user.getEmail(),      // Email
+                user.getFirstName(),  // First name
+                user.getLastName()    // Last name
+        ));
+        // HTTP 200: {"token": "eyJhbG...", "email": "user@email.com", "firstName": "John", "lastName": "Doe"}
+        // Frontend stores this token in localStorage and sends it with every future request
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // GET PROFILE — Get current user's info
+    // URL: GET http://localhost:8088/api/auth/profile
+    // Auth: REQUIRED (must have valid JWT)
+    // ═══════════════════════════════════════════════════════════
+    @GetMapping("/profile")
+    public ResponseEntity<?> getProfile() {
+        // By the time we reach here:
+        // 1. JwtFilter already validated the token
+        // 2. JwtFilter set Authentication in SecurityContext
+        // So we can now read WHO is making this request:
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String email = auth.getName();  // Gets the email from the JWT token's subject
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        return ResponseEntity.ok(new LoginResponse(null, user.getEmail(), user.getFirstName(), user.getLastName()));
+        // token=null because we're not generating a new token (user already has one)
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // UPDATE PROFILE — Modify current user's info
+    // URL: PUT http://localhost:8088/api/auth/profile
+    // Auth: REQUIRED
+    // ═══════════════════════════════════════════════════════════
+    @PutMapping("/profile")
+    public ResponseEntity<?> updateProfile(@RequestBody SignupRequest updateRequest) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String email = auth.getName();
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // Only update fields that are sent (partial update)
+        if (updateRequest.getFirstName() != null) user.setFirstName(updateRequest.getFirstName());
+        if (updateRequest.getLastName() != null) user.setLastName(updateRequest.getLastName());
+        if (updateRequest.getPassword() != null && !updateRequest.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(updateRequest.getPassword()));
+            // Re-hash the new password before saving
+        }
+
+        userRepository.save(user);
+        // UPDATE users SET first_name=?, last_name=?, password=? WHERE id=?
+
+        return ResponseEntity.ok(new MessageResponse("Profile updated successfully"));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // GET ALL USERS — List all registered users
+    // URL: GET http://localhost:8088/api/auth/users
+    // Auth: REQUIRED
+    // ═══════════════════════════════════════════════════════════
+    @GetMapping("/users")
+    public ResponseEntity<?> getAllUsers() {
+        List<User> users = userRepository.findAll();
+        // SELECT * FROM users
+
+        List<LoginResponse> response = users.stream()
+                .map(u -> new LoginResponse(null, u.getEmail(), u.getFirstName(), u.getLastName()))
+                .collect(Collectors.toList());
+        // Convert User entities to DTOs (hides password from response)
+
+        return ResponseEntity.ok(response);
+        // HTTP 200: [{"token":null,"email":"...","firstName":"...","lastName":"..."}, ...]
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // CREATE USER — Admin creates a new user
+    // URL: POST http://localhost:8088/api/auth/users
+    // Auth: REQUIRED
+    // ═══════════════════════════════════════════════════════════
+    @PostMapping("/users")
+    public ResponseEntity<?> createUser(@Valid @RequestBody SignupRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            return ResponseEntity.badRequest().body(new MessageResponse("Email already exists"));
+        }
+
+        User user = new User();
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
+        user.setEmail(request.getEmail());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+
+        Set<Role> roles = new HashSet<>();
+        Role userRole = roleRepository.findByName("ROLE_USER")
+                .orElseGet(() -> {
+                    Role newRole = new Role();
+                    newRole.setName("ROLE_USER");
+                    return roleRepository.save(newRole);
+                });
+        roles.add(userRole);
+        user.setRoles(roles);
+
+        userRepository.save(user);
+        return ResponseEntity.ok(new MessageResponse("User created successfully"));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // UPDATE USER BY ID
+    // URL: PUT http://localhost:8088/api/auth/users/5
+    // Auth: REQUIRED
+    // ═══════════════════════════════════════════════════════════
+    @PutMapping("/users/{id}")
+    public ResponseEntity<?> updateUser(@PathVariable Long id, @RequestBody SignupRequest request) {
+        // @PathVariable → extracts "5" from URL "/api/auth/users/5" → id = 5L
+
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        // SELECT * FROM users WHERE id = 5
+
+        if (request.getFirstName() != null) user.setFirstName(request.getFirstName());
+        if (request.getLastName() != null) user.setLastName(request.getLastName());
+        if (request.getEmail() != null) user.setEmail(request.getEmail());
+        if (request.getPassword() != null && !request.getPassword().isBlank()) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
+        userRepository.save(user);
+        return ResponseEntity.ok(new MessageResponse("User updated successfully"));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // DELETE USER
+    // URL: DELETE http://localhost:8088/api/auth/users/5
+    // Auth: REQUIRED
+    // ═══════════════════════════════════════════════════════════
+    @DeleteMapping("/users/{id}")
+    public ResponseEntity<?> deleteUser(@PathVariable Long id) {
+        userRepository.deleteById(id);
+        // DELETE FROM user_roles WHERE user_id = 5
+        // DELETE FROM users WHERE id = 5
+        return ResponseEntity.ok(new MessageResponse("User deleted successfully"));
+    }
+}
+```
+
+---
+
+### 16.7 `ProductController.java` — PRODUCT CRUD (Full Actual Code with Detail)
+
+```java
+package com.example.inventory.controller;
+
+import com.example.inventory.entity.Product;
+import com.example.inventory.repository.ProductRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController               // Returns JSON responses
+@RequestMapping("/api/products")  // Base path: /api/products
+public class ProductController {
+
+    @Autowired
+    private ProductRepository productRepository;
+    // ↑ Spring injects the repository (provides DB access)
+
+    // ═══════════════════════════════════════════════════════════
+    // GET ALL PRODUCTS
+    // URL: GET http://localhost:8088/api/products
+    // Auth: REQUIRED (JWT token must be in header)
+    // Response: Array of all products
+    // ═══════════════════════════════════════════════════════════
+    @GetMapping
+    public ResponseEntity<List<Product>> getAllProducts() {
+        return ResponseEntity.ok(productRepository.findAll());
+        // findAll() → SELECT * FROM products
+        // ResponseEntity.ok() → HTTP 200 status
+        // Spring auto-converts List<Product> to JSON array:
+        // [{"id":1,"name":"Laptop","description":"...","manufacturer":"Dell","quantity":10,"price":999.99}, ...]
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // GET SINGLE PRODUCT
+    // URL: GET http://localhost:8088/api/products/3
+    // Auth: REQUIRED
+    // Response: Single product object
+    // ═══════════════════════════════════════════════════════════
+    @GetMapping("/{id}")
+    public ResponseEntity<Product> getProduct(@PathVariable Long id) {
+        // @PathVariable → /api/products/3 → id = 3
+
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+        // SELECT * FROM products WHERE id = 3
+        // If not found → throws RuntimeException → Spring returns 500
+
+        return ResponseEntity.ok(product);
+        // HTTP 200: {"id":3,"name":"Monitor","description":"27 inch","manufacturer":"LG","quantity":5,"price":350.00}
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // CREATE PRODUCT
+    // URL: POST http://localhost:8088/api/products
+    // Auth: REQUIRED
+    // Body: {"name":"Keyboard","description":"Mechanical","manufacturer":"Corsair","quantity":50,"price":89.99}
+    // Response: The created product (with generated ID)
+    // ═══════════════════════════════════════════════════════════
+    @PostMapping
+    public ResponseEntity<Product> createProduct(@RequestBody Product product) {
+        // @RequestBody → parses JSON body into Product object
+        // product.id will be null (auto-generated by database)
+
+        return ResponseEntity.ok(productRepository.save(product));
+        // save() with null id → INSERT INTO products (name, description, manufacturer, quantity, price)
+        //                        VALUES ('Keyboard', 'Mechanical', 'Corsair', 50, 89.99)
+        // Returns the saved product WITH the auto-generated id:
+        // HTTP 200: {"id":4,"name":"Keyboard","description":"Mechanical","manufacturer":"Corsair","quantity":50,"price":89.99}
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // UPDATE PRODUCT
+    // URL: PUT http://localhost:8088/api/products/4
+    // Auth: REQUIRED
+    // Body: {"name":"Keyboard Pro","price":129.99} (partial update allowed)
+    // Response: The updated product
+    // ═══════════════════════════════════════════════════════════
+    @PutMapping("/{id}")
+    public ResponseEntity<Product> updateProduct(@PathVariable Long id, @RequestBody Product product) {
+        // First, find the existing product
+        Product existing = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+        // SELECT * FROM products WHERE id = 4
+
+        // PARTIAL UPDATE: Only update fields that are provided (not null)
+        if (product.getName() != null) existing.setName(product.getName());
+        if (product.getDescription() != null) existing.setDescription(product.getDescription());
+        if (product.getManufacturer() != null) existing.setManufacturer(product.getManufacturer());
+        if (product.getQuantity() != null) existing.setQuantity(product.getQuantity());
+        if (product.getPrice() != null) existing.setPrice(product.getPrice());
+        // If frontend only sends {"price": 129.99}, only price changes
+        // Other fields remain unchanged
+
+        return ResponseEntity.ok(productRepository.save(existing));
+        // save() with existing id → UPDATE products SET name=?, description=?, ... WHERE id=4
+        // HTTP 200: {"id":4,"name":"Keyboard Pro","description":"Mechanical","manufacturer":"Corsair","quantity":50,"price":129.99}
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // DELETE PRODUCT
+    // URL: DELETE http://localhost:8088/api/products/4
+    // Auth: REQUIRED
+    // Response: Empty 200 OK
+    // ═══════════════════════════════════════════════════════════
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteProduct(@PathVariable Long id) {
+        productRepository.deleteById(id);
+        // DELETE FROM products WHERE id = 4
+        // If id doesn't exist → throws EmptyResultDataAccessException
+
+        return ResponseEntity.ok().build();
+        // HTTP 200 with empty body
+    }
+}
+```
+
+---
+
+### 16.8 `SaleController.java` — SALES CRUD (Full Actual Code)
+
+```java
+package com.example.inventory.controller;
+
+import com.example.inventory.entity.Sale;
+import com.example.inventory.repository.SaleRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/sales")
+public class SaleController {
+
+    @Autowired
+    private SaleRepository saleRepository;
+
+    // GET /api/sales → returns all monthly sales records
+    @GetMapping
+    public ResponseEntity<List<Sale>> getAllSales() {
+        return ResponseEntity.ok(saleRepository.findAll());
+        // SELECT * FROM sales
+        // Returns: [{"id":1,"name":"January","sales":150,"revenue":45000.0}, ...]
+    }
+
+    // POST /api/sales → create a new sales record
+    @PostMapping
+    public ResponseEntity<Sale> createSale(@RequestBody Sale sale) {
+        return ResponseEntity.ok(saleRepository.save(sale));
+        // INSERT INTO sales (name, sales, revenue) VALUES ('February', 200, 60000.0)
+    }
+
+    // PUT /api/sales/1 → update existing sales record
+    @PutMapping("/{id}")
+    public ResponseEntity<Sale> updateSale(@PathVariable Long id, @RequestBody Sale sale) {
+        Sale existing = saleRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Sale not found"));
+
+        // Partial update
+        if (sale.getName() != null) existing.setName(sale.getName());
+        if (sale.getSales() != null) existing.setSales(sale.getSales());
+        if (sale.getRevenue() != null) existing.setRevenue(sale.getRevenue());
+
+        return ResponseEntity.ok(saleRepository.save(existing));
+        // UPDATE sales SET name=?, sales=?, revenue=? WHERE id=1
+    }
+
+    // DELETE /api/sales/1 → remove a sales record
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteSale(@PathVariable Long id) {
+        saleRepository.deleteById(id);
+        // DELETE FROM sales WHERE id = 1
+        return ResponseEntity.ok().build();
+    }
+}
+```
+
+---
+
+## 17. HOW COMPONENTS CONNECT — The Dependency Map
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        COMPONENT RELATIONSHIPS                       │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────────┐         ┌──────────────────────┐              │
+│  │  AuthController   │────────►│  AuthenticationManager │            │
+│  │                   │         └──────────┬───────────┘              │
+│  │  @Autowired:      │                    │                          │
+│  │  - authManager    │                    ▼                          │
+│  │  - userRepo       │         ┌──────────────────────┐              │
+│  │  - roleRepo       │         │ DaoAuthenticationProvider │         │
+│  │  - passwordEncoder│         │                      │              │
+│  │  - jwtUtils       │         │  uses:               │              │
+│  └──────────────────┘         │  - UserDetailsService │              │
+│                                │  - PasswordEncoder    │              │
+│                                └──────────┬───────────┘              │
+│                                           │                          │
+│                                           ▼                          │
+│  ┌──────────────────┐         ┌──────────────────────┐              │
+│  │ JwtAuthFilter     │────────►│ CustomUserDetailsService │          │
+│  │                   │         │                      │              │
+│  │  @Autowired:      │         │  @Autowired:         │              │
+│  │  - jwtUtils       │         │  - userRepository    │              │
+│  │  - userDetailsSvc │         └──────────┬───────────┘              │
+│  └──────────────────┘                    │                          │
+│           │                               ▼                          │
+│           │                    ┌──────────────────────┐              │
+│           └───────────────────►│     UserRepository    │              │
+│                                │  (JpaRepository)     │              │
+│                                │                      │              │
+│                                │  - findByEmail()     │              │
+│                                │  - existsByEmail()   │              │
+│                                │  - findAll()         │              │
+│                                │  - save()            │              │
+│                                │  - deleteById()      │              │
+│                                └──────────┬───────────┘              │
+│                                           │                          │
+│                                           ▼                          │
+│                                ┌──────────────────────┐              │
+│                                │   MySQL Database      │              │
+│                                │   (inventory_db)      │              │
+│                                └──────────────────────┘              │
+│                                                                     │
+│  ┌──────────────────┐         ┌──────────────────────┐              │
+│  │ ProductController │────────►│  ProductRepository    │──────►DB    │
+│  └──────────────────┘         └──────────────────────┘              │
+│                                                                     │
+│  ┌──────────────────┐         ┌──────────────────────┐              │
+│  │  SaleController   │────────►│   SaleRepository     │──────►DB    │
+│  └──────────────────┘         └──────────────────────┘              │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 18. WHAT EACH FILE IS RESPONSIBLE FOR (Summary)
+
+| File | Role | Analogy |
+|------|------|---------|
+| `InventoryBackendApplication.java` | Starts everything | The ignition key of a car |
+| `SecurityConfig.java` | Defines security rules | The security system blueprint |
+| `JwtAuthenticationFilter.java` | Checks tokens on every request | The security guard at the door |
+| `JwtUtils.java` | Creates & validates tokens | The ID card printer & scanner |
+| `CustomUserDetailsService.java` | Finds users in database | The personnel records clerk |
+| `AuthController.java` | Handles login/signup/users | The reception desk |
+| `ProductController.java` | Handles product CRUD | The warehouse manager |
+| `SaleController.java` | Handles sales CRUD | The sales department |
+| `User.java` | Defines user table structure | A user's database blueprint |
+| `Product.java` | Defines product table structure | A product's database blueprint |
+| `Sale.java` | Defines sales table structure | A sale record's blueprint |
+| `Role.java` | Defines roles table | Access level definitions |
+| `UserRepository.java` | Queries users table | The database query helper for users |
+| `ProductRepository.java` | Queries products table | The database query helper for products |
+| `SaleRepository.java` | Queries sales table | The database query helper for sales |
+| `RoleRepository.java` | Queries roles table | The database query helper for roles |
+| `LoginRequest.java` | Shape of login data | "What do I need to log in?" |
+| `LoginResponse.java` | Shape of login response | "What do I get back after login?" |
+| `SignupRequest.java` | Shape of registration data | "What do I need to register?" |
+| `MessageResponse.java` | Simple success/error message | A standard reply format |
+| `application.properties` | All app settings | The configuration panel |
+| `pom.xml` | Dependencies & build config | The ingredient list |
+
+---
+
+## 19. END-TO-END SCENARIOS
+
+### Scenario A: First-time User Experience
+
+```
+1. User opens http://localhost:3000 → redirected to /login (no token)
+2. User clicks "Register" → goes to /register
+3. User fills: firstName="John", lastName="Doe", email="john@test.com", password="pass123"
+4. Frontend sends POST /api/auth/signup → Backend:
+   a. Validates fields (not blank, valid email)
+   b. Checks email doesn't exist already
+   c. Hashes "pass123" → "$2a$10$..."
+   d. Creates ROLE_USER if not exists
+   e. Saves user + assigns role
+   f. Returns: {"message": "User registered successfully"}
+5. Frontend redirects to /login
+6. User enters email + password
+7. Frontend sends POST /api/auth/login → Backend:
+   a. Loads user by email from DB
+   b. Compares BCrypt hash → matches!
+   c. Generates JWT: subject="john@test.com", expires=+24h
+   d. Returns: {"token":"eyJ...", "email":"john@test.com", "firstName":"John", "lastName":"Doe"}
+8. Frontend stores token in localStorage
+9. Frontend redirects to /dashboard
+10. All future requests include: Authorization: Bearer eyJ...
+```
+
+### Scenario B: Adding a Product
+
+```
+1. User is on /products page (authenticated)
+2. User clicks "Add Product" → navigates to /products/add
+3. User fills: name="Laptop", description="Gaming", manufacturer="ASUS", quantity=10, price=1299.99
+4. Frontend validates with Formik + Yup (client-side)
+5. Frontend sends POST /api/products with JWT header → Backend:
+   a. JwtFilter validates token ✓
+   b. SecurityChain: user is authenticated ✓
+   c. Request reaches ProductController.createProduct()
+   d. @RequestBody parses JSON → Product object
+   e. productRepository.save(product) → INSERT INTO products VALUES(...)
+   f. Returns saved product with auto-generated ID
+6. Frontend shows success toast
+7. Frontend navigates to /products (list)
+8. ProductList sends GET /api/products → gets updated list including new product
+```
+
+### Scenario C: Token Expired (After 24 Hours)
+
+```
+1. User has been away for 25 hours
+2. User tries to view products
+3. Frontend sends GET /api/products with old JWT → Backend:
+   a. JwtFilter extracts token
+   b. validateJwtToken() → catches ExpiredJwtException → returns false
+   c. SecurityContext NOT set (user not authenticated)
+   d. SecurityChain: /api/products requires authentication → user not authenticated
+   e. Returns 401 Unauthorized
+4. Frontend Axios interceptor catches 401
+5. Frontend redirects to /login
+6. User must login again to get a new token
+```
